@@ -1,0 +1,14 @@
+{
+  "name": "carebridge-server",
+  "version": "0.1.0",
+  "description": "CareBridge API and static file server (no npm dependencies)",
+  "private": true,
+  "license": "MIT",
+  "main": "server.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "backup": "node scripts/backup.js"
+  }
+}

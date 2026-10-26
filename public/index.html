@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E6B68">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>CareBridge</title>
+<style>
+:root{--bg:#EEF3F2;--card:#FFFFFF;--ink:#10302E;--mute:#5B726F;--line:#D3DFDD;--lake:#0E6B68;--on:#FFFFFF;--bub:#E3EFED;--g:#2E8B57;--a:#B07800;--r:#C23B2E;--sg:#E1F3E8;--sa:#FFF3D6;--sr:#FBE3E0}
+@media (prefers-color-scheme:dark){:root{--bg:#0B1918;--card:#122624;--ink:#E4F1EF;--mute:#93ADAA;--line:#244240;--lake:#3FB5AF;--on:#06201F;--bub:#1B3533;--g:#5CCB8A;--a:#E8B23A;--r:#F27B6E;--sg:#143324;--sa:#3A2F10;--sr:#3D1A17}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.4}
+#app{max-width:480px;margin:0 auto;height:100%;display:flex;flex-direction:column;background:var(--bg)}
+@media (min-width:520px){#app{border-left:1px solid var(--line);border-right:1px solid var(--line)}}
+.top{display:flex;align-items:center;gap:.6rem;padding:.8rem 1rem;padding-top:calc(.8rem + env(safe-area-inset-top,0px));background:var(--lake);color:var(--on)}
+.top h1{margin:0;font-size:1.25rem;font-weight:800;flex:1}
+.top button{font:inherit;background:transparent;border:1px solid currentColor;color:inherit;border-radius:999px;padding:.2rem .7rem;cursor:pointer;font-size:.85rem}
+main{flex:1;overflow-y:auto;padding:1rem}
+nav{display:flex;border-top:1px solid var(--line);background:var(--card);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;font:inherit;background:none;border:0;padding:.75rem .25rem;color:var(--mute);cursor:pointer;font-weight:600}
+nav button[aria-current="page"]{color:var(--lake);box-shadow:inset 0 3px 0 var(--lake)}
+h2{margin:.2rem 0 .8rem;font-size:1.3rem}h3{margin:1rem 0 .4rem;font-size:1rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:.8rem .9rem;margin-bottom:.6rem}
+.item{display:flex;gap:.7rem;align-items:center;cursor:pointer;width:100%;text-align:left;font:inherit;color:inherit}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--g);flex:none}.dot.amber{background:var(--a)}.dot.red{background:var(--r)}.dot.none{background:var(--line)}
+.grow{flex:1;min-width:0}.grow small,.mute{color:var(--mute);font-size:.85rem}.grow small{display:block}
+.tag{font-size:.78rem;border-radius:999px;padding:.12rem .6rem;font-weight:600;background:var(--sg);color:var(--g);display:inline-block}
+.tag.amber{background:var(--sa);color:var(--a)}.tag.red{background:var(--sr);color:var(--r)}.tag.plain{background:var(--bub);color:var(--ink)}
+input,select,textarea{font:inherit;width:100%;padding:.55rem .7rem;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);margin:.2rem 0 .7rem}
+label{font-size:.88rem;font-weight:600}
+.btn{font:inherit;font-weight:600;border:0;border-radius:10px;background:var(--lake);color:var(--on);padding:.6rem 1rem;cursor:pointer}
+.btn.alt{background:transparent;color:var(--lake);border:1.5px solid var(--lake)}.btn.full{width:100%;margin-top:.4rem}
+.btn.sm{padding:.3rem .7rem;font-size:.85rem;margin:0}
+.row{display:flex;gap:.5rem;flex-wrap:wrap}
+.seg{display:flex;gap:.4rem;margin:.2rem 0 .8rem}.seg button{flex:1;font:inherit;padding:.4rem;border-radius:999px;border:1.5px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--lake);color:var(--on);border-color:var(--lake)}
+.q{display:flex;align-items:center;gap:.6rem;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid var(--line)}.q span{flex:1}
+.q .seg{margin:0;flex:none}.q .seg button{padding:.25rem .9rem}
+.msg{padding:.5rem .75rem;border-radius:14px;margin:.35rem 0;max-width:88%;font-size:.93rem}
+.msg.nurse{background:var(--bub);border-bottom-left-radius:4px}.msg.patient{background:var(--lake);color:var(--on);margin-left:auto;border-bottom-right-radius:4px}
+.msg small{display:block;opacity:.75;font-size:.75rem}
+.chips span{margin:0 .25rem .25rem 0}
+.banner{border-left:6px solid var(--g);background:var(--sg);padding:.7rem .9rem;border-radius:10px;margin-bottom:.8rem}
+.banner.amber{border-color:var(--a);background:var(--sa)}.banner.red{border-color:var(--r);background:var(--sr)}
+.cred{font-size:1.3rem;font-weight:800;letter-spacing:.06em}
+.err{color:var(--r)}
+:focus-visible{outline:3px solid var(--a);outline-offset:2px}
+.note{color:var(--mute);font-size:.8rem;text-align:center;padding:.5rem 1rem 1rem}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function(){
+var $app=document.getElementById("app"),SK="carebridge_session";
+function iso(o){var d=new Date();d.setDate(d.getDate()+(o||0));return d.toLocaleDateString("en-CA")}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function risk(a,em){var s=(a.meds===false?1:0)+(a.sw?2:0)+(a.br?3:0)+(a.fv?2:0);return(em||a.br||s>=4)?"red":(s>0?"amber":"green")}
+var S={token:null,role:null,user:"",admin:false,pid:null,tab:"patients",open:null,filter:"monitoring",q:"",pts:[],flash:"",cred:null,form:null,lt:"nurse",busy:false};
+try{var sv=JSON.parse(localStorage.getItem(SK));if(sv&&sv.token){S.token=sv.token;S.role=sv.role;S.user=sv.user;S.admin=sv.admin;S.pid=sv.pid;S.tab=sv.role==="nurse"?"patients":"today"}}catch(e){}
+function keep(){try{if(S.token)localStorage.setItem(SK,JSON.stringify({token:S.token,role:S.role,user:S.user,admin:S.admin,pid:S.pid}));else localStorage.removeItem(SK)}catch(e){}}
+function api(p,m,b){return fetch("/api"+p,{method:m||"GET",headers:{"Content-Type":"application/json",Authorization:"Bearer "+(S.token||"")},body:b?JSON.stringify(b):undefined}).then(function(r){return r.json().then(function(j){
+ if(r.status===401&&S.token){S.token=null;S.role=null;keep();S.flash="Session ended. Please sign in again."}
+ if(!r.ok)throw new Error(j.error||"Request failed");return j})},function(){throw new Error("Cannot reach the server. Check your connection.")})}
+function load(){return api("/patients").then(function(l){S.pts=l})}
+function run(fn){S.flash="";return fn().then(load).then(draw).catch(function(e){S.flash=e.message;draw()})}
+function P(id){return S.pts.filter(function(p){return p.id===id})[0]}
+function last(p){return p.checkins.length?p.checkins[p.checkins.length-1]:null}
+function lv(p){var c=last(p);return c?risk(c.a,c.em):"none"}
+function dayN(p){return Math.max(1,Math.round((new Date(iso(0))-new Date(p.dd))/864e5)+1)}
+var LB={green:"On track",amber:"Needs a call",red:"Urgent",none:"No check-in"};
+function chips(c){var a=c.a,o=[];if(c.em)o.push("Emergency symptom");if(a.meds===false)o.push("Missed medicine");if(a.sw)o.push("Swelling");if(a.br)o.push("Short of breath");if(a.fv)o.push("Fever");return o.length?o.map(function(x){return'<span class="tag amber">'+x+"</span>"}).join(""):'<span class="tag">No warning signs</span>'}
+function g(i){return document.getElementById(i).value.trim()}
+window.cb={
+login:function(){S.flash="";api("/login","POST",{role:S.lt==="patient"?"patient":"staff",id:g("u"),pin:g("pw")}).then(function(r){S.token=r.token;S.role=r.role;S.user=r.user;S.admin=r.admin;S.pid=r.pid;S.tab=r.role==="nurse"?"patients":"today";S.open=null;keep();return load()}).then(draw).catch(function(e){S.flash=e.message;draw()})},
+out:function(){api("/logout","POST").catch(function(){}).then(function(){S.token=null;S.role=null;S.pts=[];S.cred=null;keep();draw()})},
+tab:function(t){S.tab=t;S.open=null;S.cred=null;S.flash="";draw()},
+open:function(id){S.open=id;S.cred=null;S.flash="";draw()},back:function(){S.open=null;draw()},
+filter:function(f){S.filter=f;draw()},
+search:function(v){S.q=v;draw();var i=document.getElementById("sq");if(i){i.focus();i.setSelectionRange(v.length,v.length)}},
+ack:function(id,i){run(function(){return api("/patients/"+id+"/checkins/"+i+"/ack","POST")})},
+status:function(id,s){run(function(){return api("/patients/"+id+"/status","POST",{status:s})})},
+reset:function(id){if(!confirm("Create a new PIN for this patient? The old PIN will stop working."))return;S.flash="";api("/patients/"+id+"/resetpin","POST").then(function(r){S.cred={pin:r.pin,code:P(id).code,name:P(id).name,reset:true};draw()}).catch(function(e){S.flash=e.message;draw()})},
+say:function(id){var v=g("say");if(!v)return;run(function(){return api("/patients/"+id+"/log","POST",{text:v})})},
+addp:function(){var b={name:g("f_n"),age:g("f_a"),phone:g("f_p"),dx:g("f_dx"),ward:g("f_w"),dd:g("f_d"),meds:g("f_m")};S.flash="";api("/patients","POST",b).then(function(r){S.cred={pin:r.pin,code:r.patient.code,name:r.patient.name};return load()}).then(draw).catch(function(e){S.flash=e.message;draw()})},
+addstaff:function(){run(function(){return api("/staff","POST",{id:g("s_i"),name:g("s_n"),pin:g("s_p")}).then(function(){S.flash="Staff account created."})}).then(function(){})},
+chk:function(k,v){S.form=S.form||{};S.form[k]=v;var n=document.getElementById("cn");if(n)S.note=n.value;draw()},
+submit:function(){var f=S.form||{};if(["meds","sw","br","fv"].some(function(k){return f[k]===undefined})){S.flash="Please answer all four questions.";return draw()}
+ var note=g("cn");run(function(){return api("/patients/"+S.pid+"/checkins","POST",{a:f,note:note}).then(function(){S.form=null;S.note=""})})},
+draw:null};
+window.S=S;
+function seg(k,v){return'<span class="seg"><button aria-pressed="'+(v===true)+'" onclick="cb.chk(\''+k+'\',true)">Yes</button><button aria-pressed="'+(v===false)+'" onclick="cb.chk(\''+k+'\',false)">No</button></span>'}
+function flash(){return S.flash?'<p class="err" role="alert">'+esc(S.flash)+"</p>":""}
+function logHtml(p){return p.log.length?p.log.map(function(m){return'<div class="msg '+m.role+'"><small>'+esc(m.by)+" · "+esc(m.ts)+"</small>"+esc(m.text)+"</div>"}).join(""):'<p class="mute">No messages yet.</p>'}
+function sayBox(id,ph){return'<textarea id="say" rows="2" placeholder="'+ph+'" aria-label="Message"></textarea><button class="btn full" onclick="cb.say('+id+')">Send</button>'}
+function loginV(){var p=S.lt==="patient";return'<div class="top"><h1>CareBridge</h1></div><main><h2>Sign in</h2><div class="seg"><button aria-pressed="'+!p+'" onclick="S.lt=\'nurse\';S.flash=\'\';cb.d()">Nurse / staff</button><button aria-pressed="'+p+'" onclick="S.lt=\'patient\';S.flash=\'\';cb.d()">Patient</button></div><label for="u">'+(p?"Patient code":"Staff ID")+'</label><input id="u" autocomplete="username" placeholder="'+(p?"CB-1001":"Staff ID")+'"><label for="pw">PIN</label><input id="pw" type="password" inputmode="numeric" autocomplete="current-password" placeholder="PIN">'+flash()+'<button class="btn full" onclick="cb.login()">Sign in</button><p class="mute">Patients receive their code and PIN from the hospital when they are discharged.</p></main>'}
+function row(p){var l=lv(p);return'<button class="card item" onclick="cb.open('+p.id+')"><span class="dot '+l+'"></span><span class="grow"><b>'+esc(p.name)+"</b><small>"+esc(p.dx)+" · "+(p.status==="closed"?"Discharged, closed":"Day "+dayN(p)+" at home")+'</small></span><span class="tag '+(l==="green"?"":l)+'">'+LB[l]+"</span></button>"}
+function listV(){var f=S.filter,q=S.q.toLowerCase(),o={red:0,amber:1,none:2,green:3};var L=S.pts.filter(function(p){return p.status===f&&(!q||(p.name+p.code+p.dx).toLowerCase().indexOf(q)>-1)}).sort(function(a,b){return o[lv(a)]-o[lv(b)]});
+ var n=function(s){return S.pts.filter(function(p){return p.status===s}).length};
+ return'<h2>Patients</h2><div class="seg"><button aria-pressed="'+(f==="monitoring")+'" onclick="cb.filter(\'monitoring\')">At home ('+n("monitoring")+')</button><button aria-pressed="'+(f==="closed")+'" onclick="cb.filter(\'closed\')">Discharged ('+n("closed")+')</button></div><input id="sq" type="search" placeholder="Search name, code or diagnosis" aria-label="Search" value="'+esc(S.q)+'" oninput="cb.search(this.value)">'+(L.map(row).join("")||'<p class="mute">No patients here.</p>')}
+function alertsV(){var A=[];S.pts.forEach(function(p){if(p.status!=="monitoring")return;p.checkins.forEach(function(c,i){var r=risk(c.a,c.em);if(r!=="green"&&!c.ack)A.push({p:p,c:c,i:i,r:r})})});A.sort(function(a,b){return(b.r==="red")-(a.r==="red")});
+ return"<h2>Alerts</h2>"+flash()+(A.map(function(x){return'<div class="banner '+x.r+'"><b>'+(x.r==="red"?"Urgent: call now":"Call recommended")+" · "+esc(x.p.name)+'</b><div class="mute">'+x.c.d+" "+x.c.t+'</div><div class="chips">'+chips(x.c)+"</div>"+(x.c.note?"<p>“"+esc(x.c.note)+"”</p>":"")+'<div class="row"><button class="btn sm" onclick="cb.open('+x.p.id+')">Open record</button><button class="btn sm alt" onclick="cb.ack('+x.p.id+","+x.i+')">Acknowledge</button></div></div>'}).join("")||'<p class="mute">No open alerts. All check-ins are reviewed.</p>')}
+function credV(){var c=S.cred;return'<div class="card"><b>'+esc(c.name)+"</b><p class=\"mute\">"+(c.reset?"New PIN created.":"Patient registered.")+" Give these to the patient or caregiver. The PIN is shown only once.</p>Code<div class=\"cred\">"+esc(c.code)+"</div>PIN<div class=\"cred\">"+esc(c.pin)+"</div></div>"}
+function addV(){if(S.cred)return"<h2>Done</h2>"+credV()+'<button class="btn full" onclick="cb.tab(\'patients\')">Back to patients</button>';
+ return"<h2>Register discharged patient</h2>"+flash()+'<label for="f_n">Full name</label><input id="f_n"><div class="row"><div style="flex:1"><label for="f_a">Age</label><input id="f_a" inputmode="numeric"></div><div style="flex:2"><label for="f_p">Phone</label><input id="f_p" inputmode="tel"></div></div><label for="f_dx">Diagnosis</label><input id="f_dx"><div class="row"><div style="flex:1"><label for="f_w">Ward</label><input id="f_w"></div><div style="flex:1"><label for="f_d">Discharge date</label><input id="f_d" type="date" value="'+iso(0)+'"></div></div><label for="f_m">Medicines and instructions</label><textarea id="f_m" rows="3"></textarea><button class="btn full" onclick="cb.addp()">Save and start monitoring</button>'}
+function staffV(){return"<h2>Staff accounts</h2><p class=\"mute\">Only the owner can add nurses.</p>"+flash()+'<label for="s_i">Staff ID</label><input id="s_i" autocapitalize="none"><label for="s_n">Full name</label><input id="s_n"><label for="s_p">PIN (6 or more characters)</label><input id="s_p" type="password"><button class="btn full" onclick="cb.addstaff()">Create nurse account</button>'}
+function detailV(id){var p=P(id);if(!p)return'<button class="btn sm alt" onclick="cb.back()">‹ Back</button><p>Record not found.</p>';var n=S.role==="nurse",l=lv(p);
+ var h=(n?'<button class="btn sm alt" onclick="cb.back()">‹ Back</button>':"")+'<h2 style="margin-top:.6rem">'+esc(p.name)+"</h2>"+flash()+(S.cred&&n?credV():"")+'<div class="card"><div class="row"><span class="tag '+(l==="green"?"":l)+'">'+LB[l]+'</span><span class="tag plain">'+(p.status==="closed"?"Discharged, closed":"Day "+dayN(p)+" at home")+"</span></div><p>"+esc(p.dx)+" · "+esc(p.age)+" yrs · "+esc(p.ward)+'<br><span class="mute">Phone '+esc(p.phone)+" · Discharged "+esc(p.dd)+(n?" · Code "+esc(p.code):"")+"</span></p><b>Medicines</b><p>"+esc(p.meds||"None recorded")+"</p>";
+ if(n){h+=p.status==="closed"?'<button class="btn full" onclick="cb.status('+id+',\'monitoring\')">Reopen monitoring</button>':'<button class="btn alt full" onclick="cb.status('+id+',\'closed\')">Complete monitoring</button>';h+='<button class="btn alt full" onclick="cb.reset('+id+')">Create new patient PIN</button>'}
+ h+="</div><h3>Daily check-ins</h3>"+(p.checkins.slice().reverse().map(function(c){var r=risk(c.a,c.em);return'<div class="card"><div class="row" style="justify-content:space-between"><b>'+c.d+" "+c.t+'</b><span class="tag '+(r==="green"?"":r)+'">'+LB[r]+'</span></div><div class="chips">'+chips(c)+"</div>"+(c.note?'<p class="mute">“'+esc(c.note)+"”</p>":"")+"</div>"}).join("")||'<p class="mute">No check-ins yet.</p>')+"<h3>Nurse and patient log</h3>"+logHtml(p)+(p.status==="closed"&&!n?"":sayBox(id,n?"Add a note or reply to the patient":"Message your nurse"));return h}
+function todayV(){var p=P(S.pid);if(!p)return"<p>Loading…</p>";var c=last(p);
+ if(c&&c.d===iso(0)){var r=risk(c.a,c.em),m={green:"You are doing well. Keep taking your medicine and rest. Check in again tomorrow.",amber:"Thank you. A nurse has been asked to call you today. Keep your phone near you.",red:"Your answers may be serious. A nurse has been alerted. If you have chest pain, struggle to breathe or feel faint, go to the nearest clinic or call emergency services now."};return'<h2>Today</h2><div class="banner '+(r==="green"?"":r)+'"><b>Check-in sent at '+c.t+"</b><p>"+m[r]+"</p></div>"}
+ var f=S.form||{},qs=[["meds","Took your medicine today?"],["sw","New swelling in feet or legs?"],["br","Short of breath, or extra pillows to sleep?"],["fv","Fever or chills?"]];
+ return"<h2>Hello, "+esc(p.name.split(" ")[0])+'</h2><p class="mute">Day '+dayN(p)+" at home. Answer these four questions each day.</p>"+qs.map(function(q){return'<div class="q"><span>'+q[1]+"</span>"+seg(q[0],f[q[0]])+"</div>"}).join("")+flash()+'<label for="cn" style="display:block;margin-top:.8rem">Anything else to tell your nurse?</label><textarea id="cn" rows="3">'+esc(S.note||"")+'</textarea><button class="btn full" onclick="cb.submit()">Send check-in</button>'}
+function histV(){var p=P(S.pid);if(!p)return"";return"<h2>My history</h2>"+(p.checkins.slice().reverse().map(function(c){return'<div class="card"><b>'+c.d+'</b><div class="chips">'+chips(c)+"</div></div>"}).join("")||'<p class="mute">No check-ins yet.</p>')+'<h3>My plan</h3><div class="card">'+esc(p.meds||"No plan recorded")+"</div>"}
+function draw(){
+ if(!S.token){$app.innerHTML=loginV();return}
+ var n=S.role==="nurse",tabs=n?[["patients","Patients"],["alerts","Alerts"],["add","Register"]].concat(S.admin?[["staff","Staff"]]:[]):[["today","Today"],["hist","History"],["msg","Messages"]],body;
+ if(n)body=S.open?detailV(S.open):S.tab==="patients"?listV():S.tab==="alerts"?alertsV():S.tab==="staff"?staffV():addV();
+ else{var p=P(S.pid);body=S.tab==="today"?todayV():S.tab==="hist"?histV():"<h2>Messages</h2>"+flash()+(p?logHtml(p)+sayBox(S.pid,"Message your nurse"):"")}
+ $app.innerHTML='<div class="top"><h1>CareBridge</h1><span style="font-size:.85rem">'+esc(S.user)+'</span><button onclick="cb.out()">Sign out</button></div><main>'+body+'<p class="note">Nurses make every clinical decision. In an emergency go to the nearest clinic.</p></main><nav>'+tabs.map(function(t){return'<button onclick="cb.tab(\''+t[0]+'\')" '+((S.tab===t[0]&&!(n&&S.open))?'aria-current="page"':"")+">"+t[1]+"</button>"}).join("")+"</nav>"}
+cb.d=draw;window.draw=draw;
+if(S.token){load().then(draw).catch(function(){S.token=null;keep();draw()})}else draw();
+setInterval(function(){if(S.token&&!document.hidden&&!document.activeElement.matches("input,textarea")){load().then(draw).catch(function(){})}},60000);
+if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(function(){});
+})();
+</script>
+</body>
+</html>

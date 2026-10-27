@@ -111,7 +111,6 @@ CareBridge supports clinicians and does not replace them. Patient health data is
 - SMS and voice check-ins (including Swahili)
 - Hospital-specific care plans
 - Push notifications for urgent alerts
-<img width="781" height="339" alt="image" src="https://github.com/user-attachments/assets/97455f46-a7c3-48e9-9e92-bf7833621cdc" />
 const express = require("express");
 const Organization = require("../models/Organization");
 const User = require("../models/User");

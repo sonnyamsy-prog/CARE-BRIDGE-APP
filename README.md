@@ -111,3 +111,123 @@ CareBridge supports clinicians and does not replace them. Patient health data is
 - SMS and voice check-ins (including Swahili)
 - Hospital-specific care plans
 - Push notifications for urgent alerts
+<img width="781" height="339" alt="image" src="https://github.com/user-attachments/assets/97455f46-a7c3-48e9-9e92-bf7833621cdc" />
+const express = require("express");
+const Organization = require("../models/Organization");
+const User = require("../models/User");
+const auth = require("../middleware/auth"); // your existing auth middleware
+const orgAdmin = require("../middleware/orgAdmin");
+
+const router = express.Router();
+router.use(auth);
+
+// Create an organization. The creator becomes its first admin.
+router.post("/", async (req, res, next) => {
+  try {
+    const { name, type, email, phone, address } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Organization name is required." });
+    }
+
+    const org = await Organization.create({
+      name, type, email, phone, address,
+      createdBy: req.user.id,
+      members: [{ user: req.user.id, role: "admin" }],
+    });
+
+    await User.findByIdAndUpdate(req.user.id, { $addToSet: { organizations: org._id } });
+    res.status(201).json(org);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// List organizations the signed-in user belongs to.
+router.get("/mine", async (req, res, next) => {
+  try {
+    const orgs = await Organization.find({ "members.user": req.user.id }).sort({ name: 1 });
+    res.json(orgs);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Join an organization with its invite code.
+router.post("/join", async (req, res, next) => {
+  try {
+    const code = (req.body.inviteCode || "").trim().toUpperCase();
+    const org = await Organization.findOne({ inviteCode: code });
+    if (!org) return res.status(404).json({ message: "That invite code isn't valid." });
+
+    if (org.members.some((m) => m.user.toString() === req.user.id)) {
+      return res.status(409).json({ message: "You're already a member of this organization." });
+    }
+
+    org.members.push({ user: req.user.id, role: "member" });
+    await org.save();
+    await User.findByIdAndUpdate(req.user.id, { $addToSet: { organizations: org._id } });
+    res.json(org);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: add an existing user by email.
+router.post("/:id/members", orgAdmin, async (req, res, next) => {
+  try {
+    const user = await User.findOne({ email: (req.body.email || "").toLowerCase() });
+    if (!user) return res.status(404).json({ message: "No user found with that email." });
+
+    if (req.org.members.some((m) => m.user.equals(user._id))) {
+      return res.status(409).json({ message: "That person is already a member." });
+    }
+
+    req.org.members.push({ user: user._id, role: req.body.role === "admin" ? "admin" : "member" });
+    await req.org.save();
+    await User.findByIdAndUpdate(user._id, { $addToSet: { organizations: req.org._id } });
+    res.status(201).json(req.org);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: change a member's role.
+router.patch("/:id/members/:userId", orgAdmin, async (req, res, next) => {
+  try {
+    const member = req.org.members.find((m) => m.user.toString() === req.params.userId);
+    if (!member) return res.status(404).json({ message: "Member not found." });
+
+    const admins = req.org.members.filter((m) => m.role === "admin");
+    if (member.role === "admin" && req.body.role === "member" && admins.length === 1) {
+      return res.status(400).json({ message: "An organization needs at least one admin." });
+    }
+
+    member.role = req.body.role === "admin" ? "admin" : "member";
+    await req.org.save();
+    res.json(req.org);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: remove a member.
+router.delete("/:id/members/:userId", orgAdmin, async (req, res, next) => {
+  try {
+    const target = req.org.members.find((m) => m.user.toString() === req.params.userId);
+    if (!target) return res.status(404).json({ message: "Member not found." });
+
+    const admins = req.org.members.filter((m) => m.role === "admin");
+    if (target.role === "admin" && admins.length === 1) {
+      return res.status(400).json({ message: "You can't remove the only admin." });
+    }
+
+    req.org.members = req.org.members.filter((m) => m.user.toString() !== req.params.userId);
+    await req.org.save();
+    await User.findByIdAndUpdate(req.params.userId, { $pull: { organizations: req.org._id } });
+    res.json(req.org);
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;

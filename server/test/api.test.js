@@ -163,3 +163,94 @@ test("server refuses to start without an owner on first run", () => {
   assert.throws(() => createApp({ dataDir: d }), /OWNER_ID/);
   fs.rmSync(d, { recursive: true, force: true });
 });
+
+// ---------------- organizations ----------------
+let orgA, orgB, nurseA;
+
+test("only the owner can create organizations; code and one-time PIN are returned", async () => {
+  owner = (await login("staff", "owner", "owner-pin-1")).json.token; // an earlier test signed the owner out
+  assert.strictEqual((await call("POST", "/orgs", { name: "Nope" }, nurse.token)).status, 403);
+  assert.strictEqual((await call("POST", "/orgs", { name: "" }, owner)).status, 400);
+  const a = await call("POST", "/orgs", { name: "Kisumu County Hospital" }, owner);
+  assert.strictEqual(a.status, 200);
+  assert.match(a.json.org.code, /^ORG-[A-Z2-9]{6}$/);
+  assert.match(a.json.pin, /^\d{6}$/);
+  assert.ok(!JSON.stringify(a.json).includes("scrypt$"));
+  const b = await call("POST", "/orgs", { name: "Lakeside Clinic" }, owner);
+  assert.notStrictEqual(a.json.org.code, b.json.org.code);
+  assert.strictEqual((await call("POST", "/orgs", { name: "kisumu county hospital" }, owner)).status, 409);
+  orgA = { ...a.json.org, pin: a.json.pin }; orgB = { ...b.json.org, pin: b.json.pin };
+});
+
+test("organization signs in with its code and PIN; wrong PIN is rejected", async () => {
+  assert.strictEqual((await login("org", orgA.code, "000000x")).status, 401);
+  const r = await login("org", orgA.code.toLowerCase(), orgA.pin);
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.json.role, "org");
+  assert.strictEqual(r.json.user, "Kisumu County Hospital");
+  orgA.token = r.json.token;
+  orgB.token = (await login("org", orgB.code, orgB.pin)).json.token;
+  // an organization code does not work as a staff ID, and vice versa
+  assert.strictEqual((await login("staff", orgA.code, orgA.pin)).status, 401);
+  assert.strictEqual((await login("org", "owner", "owner-pin-1")).status, 401);
+});
+
+test("organization adds its own nurses; they are linked to it", async () => {
+  assert.strictEqual((await call("POST", "/staff", { id: "faith", name: "Nurse Faith", pin: "123" }, orgA.token)).status, 400);
+  assert.strictEqual((await call("POST", "/staff", { id: "faith", name: "Nurse Faith", pin: "faith-pin-1" }, orgA.token)).status, 200);
+  const mine = await call("GET", "/staff", null, orgA.token);
+  assert.deepStrictEqual(mine.json.map((x) => x.id), ["faith"]);
+  assert.strictEqual((await call("GET", "/staff", null, orgB.token)).json.length, 0);
+  nurseA = (await login("staff", "faith", "faith-pin-1")).json;
+});
+
+test("patients stay inside their organization", async () => {
+  const r = await call("POST", "/patients", { name: "Joy Achieng", dx: "Asthma" }, nurseA.token);
+  assert.strictEqual(r.status, 200);
+  const pid = r.json.patient.id;
+  assert.strictEqual((await call("GET", "/patients", null, nurseA.token)).json.length, 1); // not the 2 org-less patients
+  assert.strictEqual((await call("GET", "/patients", null, nurse.token)).json.length, 2);   // org-less nurse unchanged
+  assert.strictEqual((await call("GET", "/patients", null, owner)).json.length, 3);          // owner sees everything
+  assert.strictEqual((await call("GET", "/patients", null, orgA.token)).json.length, 1);
+  assert.strictEqual((await call("GET", "/patients", null, orgB.token)).json.length, 0);
+  assert.strictEqual((await call("POST", `/patients/${pid}/status`, { status: "closed" }, nurse.token)).status, 404);
+});
+
+test("an organization can read its patients but not act on them or see messages", async () => {
+  const [p] = (await call("GET", "/patients", null, orgA.token)).json;
+  assert.deepStrictEqual(p.log, []);
+  assert.ok(p.checkins.length <= 1);
+  assert.strictEqual((await call("POST", `/patients/${p.id}/log`, { text: "hi" }, orgA.token)).status, 403);
+  assert.strictEqual((await call("POST", `/patients/${p.id}/status`, { status: "closed" }, orgA.token)).status, 403);
+  assert.strictEqual((await call("POST", "/patients", { name: "X", dx: "Y" }, orgA.token)).status, 403);
+  assert.strictEqual((await call("POST", "/orgs", { name: "Sneaky" }, orgA.token)).status, 403);
+});
+
+test("owner lists organizations and can reset an organization PIN", async () => {
+  const list = await call("GET", "/orgs", null, owner);
+  assert.strictEqual(list.status, 200);
+  const a = list.json.find((o) => o.code === orgA.code);
+  assert.strictEqual(a.patients, 1);
+  assert.strictEqual(a.staff, 1);
+  assert.ok(!JSON.stringify(list.json).includes("scrypt$"));
+  assert.strictEqual((await call("GET", "/orgs", null, nurse.token)).status, 403);
+  const reset = await call("POST", `/orgs/${orgA.id}/resetpin`, null, owner);
+  assert.match(reset.json.pin, /^\d{6}$/);
+  assert.strictEqual((await call("GET", "/patients", null, orgA.token)).status, 401); // old session ended
+  assert.strictEqual((await login("org", orgA.code, orgA.pin)).status, 401);          // old PIN stops working
+  assert.strictEqual((await login("org", orgA.code, reset.json.pin)).status, 200);
+});
+
+test("organizations are stored on disk and survive a restart; old data files are upgraded", () => {
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, "db.json"), "utf8"));
+  assert.strictEqual(saved.orgs.length, 2);
+  assert.ok(saved.orgs.every((o) => o.pin.startsWith("scrypt$")));
+  const old = fs.mkdtempSync(path.join(os.tmpdir(), "carebridge-"));
+  fs.writeFileSync(path.join(old, "db.json"), JSON.stringify({ next: 1005, staff: [{ id: "owner", name: "Owner", pin: "x", admin: true }], patients: [] }));
+  const { store } = createApp({ dataDir: old });
+  assert.deepStrictEqual(store.db.orgs, []);
+  fs.rmSync(old, { recursive: true, force: true });
+  const audit = fs.readFileSync(path.join(dir, "audit.log"), "utf8");
+  assert.match(audit, /org_created/);
+  assert.ok(!audit.includes(orgA.pin));
+});

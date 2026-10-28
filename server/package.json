@@ -1,14 +1,21 @@
 {
   "name": "carebridge-server",
   "version": "0.1.0",
-  "description": "CareBridge API and static file server (no npm dependencies)",
+  "description": "CareBridge API and static file server (one npm dependency, pg, used only for PostgreSQL storage)",
   "private": true,
   "license": "MIT",
   "main": "server.js",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "backup": "node scripts/backup.js"
+    "backup": "node scripts/backup.js",
+    "backup:pg": "node scripts/pg-export.js",
+    "import:pg": "node scripts/pg-import.js"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
   }
 }

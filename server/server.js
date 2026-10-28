@@ -1,10 +1,13 @@
 "use strict";
 const http = require("node:http");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { isEmergency } = require("./lib/risk");
+const { createNotifier } = require("./sms-push");
 const { hashPin, verifyPin, randomPin, Sessions, Throttle } = require("./lib/auth");
 const { Store } = require("./lib/store");
+const { PgStore } = require("./lib/pgstore");
 
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
 const MIME = {
@@ -24,7 +27,7 @@ function createApp(opts = {}) {
     maxFails: Number(opts.maxFails || 5),
     hsts: !!opts.hsts,
   };
-  const store = new Store(cfg.dataDir);
+  const store = opts.store || new Store(cfg.dataDir); // opts.store: an already opened PgStore
   const db = store.db;
   const sessions = new Sessions(cfg.sessionHours);
   const throttle = new Throttle(cfg.maxFails);
@@ -38,6 +41,9 @@ function createApp(opts = {}) {
     store.save();
     store.audit("system", "owner_created", { staff: cfg.ownerId });
   }
+
+  // SMS + web push alerts (see server/sms-push/README.md). Both are optional and off until configured.
+  const notify = createNotifier({ db, store, env: opts.env || process.env, tz: cfg.tz, transports: opts.transports });
 
   // ---- helpers ----
   const now = () => {
@@ -60,6 +66,22 @@ function createApp(opts = {}) {
     req.socket.remoteAddress || "?";
   const safe = (p) => { const { pin, ...rest } = p; return rest; }; // never send the PIN hash
   const findPatient = (id) => db.patients.find((p) => p.id === Number(id));
+  const isOwner = (s) => s.kind === "staff" && s.admin && !s.orgId; // platform owner, not tied to an organization
+  const needOwner = (s) => { if (!isOwner(s)) throw new HttpError(403, "Only the owner can do this."); };
+  // Organization codes avoid look-alike characters (0/O, 1/I) so they are easy to read out and type.
+  const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  function newOrgCode() {
+    for (;;) {
+      let c = "ORG-";
+      for (let i = 0; i < 6; i++) c += CODE_CHARS[crypto.randomInt(CODE_CHARS.length)];
+      if (!db.orgs.some((o) => o.code === c)) return c;
+    }
+  }
+  // Which patients can this signed-in person see?
+  const sees = (s, p) =>
+    s.kind === "staff" ? isOwner(s) || (p.orgId || null) === (s.orgId || null)
+    : s.kind === "org" ? p.orgId === s.id
+    : s.id === p.id;
 
   function readJson(req) {
     return new Promise((resolve, reject) => {
@@ -88,10 +110,11 @@ function createApp(opts = {}) {
   const needStaff = (s) => { if (s.kind !== "staff") throw new HttpError(403, "Not allowed."); };
   function canSee(s, p) {
     if (!p) throw new HttpError(404, "Patient not found.");
-    if (s.kind === "patient" && s.id !== p.id) throw new HttpError(404, "Patient not found.");
+    if (s.kind === "org") throw new HttpError(403, "Not allowed.");
+    if (!sees(s, p)) throw new HttpError(404, "Patient not found.");
     return p;
   }
-  const actorName = (s) => (s.kind === "staff" ? `staff:${s.id}` : `patient:${s.code}`);
+  const actorName = (s) => (s.kind === "staff" ? `staff:${s.id}` : s.kind === "org" ? `org:${s.code}` : `patient:${s.code}`);
 
   // ---- API ----
   async function api(req, res, url) {
@@ -100,12 +123,12 @@ function createApp(opts = {}) {
 
     if (route === "login" && m === "POST") {
       const b = await readJson(req);
-      const role = b.role === "patient" ? "patient" : "staff";
+      const role = b.role === "patient" ? "patient" : b.role === "org" ? "org" : "staff";
       const id = String(b.id || "").trim();
       const key = `${role}:${id.toLowerCase()}:${clientIp(req)}`;
       if (throttle.locked(key)) throw new HttpError(429, "Too many attempts. Try again in 15 minutes.");
-      const acct = role === "staff"
-        ? db.staff.find((x) => x.id === id.toLowerCase())
+      const acct = role === "staff" ? db.staff.find((x) => x.id === id.toLowerCase())
+        : role === "org" ? db.orgs.find((x) => x.code === id.toUpperCase())
         : db.patients.find((x) => x.code === id.toUpperCase());
       const ok = verifyPin(String(b.pin || ""), acct && acct.pin) && !!acct;
       if (!ok) {
@@ -115,11 +138,12 @@ function createApp(opts = {}) {
       }
       throttle.ok(key);
       const data = role === "staff"
-        ? { kind: "staff", id: acct.id, name: acct.name, admin: !!acct.admin }
+        ? { kind: "staff", id: acct.id, name: acct.name, admin: !!acct.admin, orgId: acct.orgId || null }
+        : role === "org" ? { kind: "org", id: acct.id, code: acct.code, name: acct.name }
         : { kind: "patient", id: acct.id, code: acct.code, name: acct.name };
       const token = sessions.create(data);
       store.audit(actorName(data), "login", {});
-      return { token, role: role === "staff" ? "nurse" : "patient", user: acct.name,
+      return { token, role: role === "staff" ? "nurse" : role, user: acct.name,
                admin: !!acct.admin, pid: role === "patient" ? acct.id : null };
     }
 
@@ -129,7 +153,9 @@ function createApp(opts = {}) {
 
     if (route === "patients" && parts.length === 1) {
       if (m === "GET") {
-        const list = s.kind === "staff" ? db.patients : db.patients.filter((p) => p.id === s.id);
+        const list = db.patients.filter((p) => sees(s, p));
+        // An organization only needs each patient's latest status, not their messages or full history.
+        if (s.kind === "org") return list.map((p) => ({ ...safe(p), log: [], checkins: p.checkins.slice(-1) }));
         return list.map(safe);
       }
       if (m === "POST") {
@@ -141,7 +167,8 @@ function createApp(opts = {}) {
         const id = db.next++, pin = randomPin(6);
         const p = { id, code: "CB-" + id, pin: hashPin(pin), name, age: str(b.age, 3, "Age"),
           phone: str(b.phone, 30, "Phone"), dx, ward: str(b.ward, 100, "Ward"),
-          meds: str(b.meds, 1000, "Medicines"), dd, status: "monitoring", checkins: [], log: [] };
+          meds: str(b.meds, 1000, "Medicines"), dd, status: "monitoring", checkins: [], log: [],
+          ...(s.orgId ? { orgId: s.orgId } : {}) };
         db.patients.push(p); store.save();
         store.audit(actorName(s), "patient_registered", { patient: id });
         return { pin, patient: safe(p) };
@@ -159,11 +186,13 @@ function createApp(opts = {}) {
         for (const k of ["meds", "sw", "br", "fv"]) if (typeof a[k] !== "boolean") throw bad("Please answer all four questions.");
         const note = str(b.note, 1000, "Note");
         const t = now();
-        p.checkins.push({ d: t.d, t: t.t, a: { meds: a.meds, sw: a.sw, br: a.br, fv: a.fv },
-          note, em: isEmergency(note), ack: false });
+        const ck = { d: t.d, t: t.t, a: { meds: a.meds, sw: a.sw, br: a.br, fv: a.fv },
+          note, em: isEmergency(note), ack: false };
+        p.checkins.push(ck);
         if (note) p.log.push({ by: p.name, role: "patient", text: note, ts: `${t.d} ${t.t}` });
         store.save();
         store.audit(actorName(s), "checkin", { patient: p.id });
+        notify.afterCheckin(p, ck); // urgent check-ins trigger push and SMS alerts; never blocks this reply
         return { ok: true };
       }
       if (action === "checkins" && parts[4] === "ack" && m === "POST") {
@@ -207,9 +236,66 @@ function createApp(opts = {}) {
       }
     }
 
+    // ---- push alerts (nurses and organizations only) ----
+    if (route === "push") {
+      if (s.kind === "patient") throw new HttpError(403, "Not allowed.");
+      if (parts[1] === "key" && m === "GET") return { key: notify.publicKey };
+      if (parts[1] === "subscribe" && m === "POST") {
+        try { notify.subscribe(s, (await readJson(req)).endpoint); }
+        catch (e) { throw e.status ? new HttpError(e.status, e.message) : e; }
+        store.audit(actorName(s), "push_on", {});
+        return { ok: true };
+      }
+      if (parts[1] === "unsubscribe" && m === "POST") {
+        notify.unsubscribe(s, (await readJson(req)).endpoint);
+        return { ok: true };
+      }
+    }
+
+    // ---- organizations (hospitals / clinics) ----
+    if (route === "orgs" && parts.length === 1) {
+      if (m === "GET") {
+        if (s.kind === "org") { const o = db.orgs.find((x) => x.id === s.id); return [{ id: o.id, code: o.code, name: o.name }]; }
+        needOwner(s);
+        return db.orgs.map((o) => ({ id: o.id, code: o.code, name: o.name, createdAt: o.createdAt, alertPhone: o.alertPhone || null,
+          patients: db.patients.filter((p) => p.orgId === o.id).length,
+          staff: db.staff.filter((x) => x.orgId === o.id).length }));
+      }
+      if (m === "POST") {
+        needOwner(s);
+        const b = await readJson(req);
+        const name = str(b.name, 100, "Organization name", true);
+        const phone = b.phone ? notify.sms.normalize(b.phone) : null;
+        if (b.phone && !phone) throw bad("Alert phone number does not look right. Example: 0712 345 678.");
+        if (db.orgs.some((o) => o.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, "An organization with that name already exists.");
+        const pin = randomPin(6);
+        const o = { id: db.nextOrg++, code: newOrgCode(), name, pin: hashPin(pin), createdAt: now().d, ...(phone ? { alertPhone: phone } : {}) };
+        db.orgs.push(o); store.save();
+        store.audit(actorName(s), "org_created", { org: o.code });
+        return { pin, org: { id: o.id, code: o.code, name: o.name } }; // PIN is shown once
+      }
+    }
+    if (route === "orgs" && parts.length === 3 && parts[2] === "resetpin" && m === "POST") {
+      needOwner(s);
+      const o = db.orgs.find((x) => x.id === Number(parts[1]));
+      if (!o) throw new HttpError(404, "Organization not found.");
+      const pin = randomPin(6);
+      o.pin = hashPin(pin); store.save();
+      sessions.destroyFor("org", o.id);
+      store.audit(actorName(s), "org_pin_reset", { org: o.code });
+      return { pin, code: o.code, name: o.name };
+    }
+
+    if (route === "staff" && parts.length === 1 && m === "GET") {
+      if (s.kind === "patient") throw new HttpError(403, "Not allowed.");
+      if (s.kind === "staff" && !isOwner(s)) throw new HttpError(403, "Only the owner or an organization can list nurses.");
+      const list = s.kind === "org" ? db.staff.filter((x) => x.orgId === s.id) : db.staff;
+      return list.map((x) => ({ id: x.id, name: x.name, admin: !!x.admin, orgId: x.orgId || null }));
+    }
     if (route === "staff" && parts.length === 1 && m === "POST") {
-      needStaff(s);
-      if (!s.admin) throw new HttpError(403, "Only the owner can add nurses.");
+      // The owner or an organization can add nurses. An organization's nurses belong to it.
+      if (s.kind === "patient") throw new HttpError(403, "Not allowed.");
+      if (s.kind === "staff" && !isOwner(s)) throw new HttpError(403, "Only the owner or an organization can add nurses.");
       const b = await readJson(req);
       const id = str(b.id, 32, "Staff ID", true).toLowerCase();
       if (!/^[a-z0-9._-]{3,32}$/.test(id)) throw bad("Staff ID: 3 to 32 letters, numbers, dot, dash or underscore.");
@@ -217,7 +303,7 @@ function createApp(opts = {}) {
       if (pin.length < 6) throw bad("PIN must be 6 or more characters.");
       if (pin.length > 100) throw bad("PIN is too long.");
       if (db.staff.some((x) => x.id === id)) throw new HttpError(409, "That Staff ID already exists.");
-      db.staff.push({ id, name, pin: hashPin(pin), admin: false }); store.save();
+      db.staff.push({ id, name, pin: hashPin(pin), admin: false, ...(s.kind === "org" ? { orgId: s.id } : {}) }); store.save();
       store.audit(actorName(s), "staff_created", { staff: id });
       return { ok: true };
     }
@@ -259,7 +345,13 @@ function createApp(opts = {}) {
       const url = new URL(req.url, "http://localhost");
       if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
         res.setHeader("Cache-Control", "no-store");
-        return send(res, 200, await api(req, res, url));
+        const out = await api(req, res, url);
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          // With Postgres, answer "saved" only after the database has committed the change.
+          try { await store.settled(); }
+          catch { return send(res, 503, { error: "Could not save your changes. Please try again." }); }
+        }
+        return send(res, 200, out);
       }
       serveStatic(req, res, url);
     } catch (e) {
@@ -269,13 +361,30 @@ function createApp(opts = {}) {
     }
   });
 
-  return { server, store, cfg };
+  return { server, store, cfg, notify };
 }
 
 module.exports = { createApp };
 
 if (require.main === module) {
-  const { server, cfg } = createApp({ hsts: process.env.HSTS === "1" });
-  const port = Number(process.env.PORT || 3000);
-  server.listen(port, () => console.log(`CareBridge running on http://localhost:${port} (data: ${cfg.dataDir})`));
+  (async () => {
+    let store;
+    if (process.env.DATABASE_URL) {
+      store = await PgStore.connect(process.env.DATABASE_URL, { ssl: process.env.DATABASE_SSL });
+      console.log("Storage: PostgreSQL");
+    }
+    const { server, cfg, notify, store: active } = createApp({ hsts: process.env.HSTS === "1", store });
+    notify.startReminders(); // daily SMS reminders, only if REMINDER_HOUR and SMS are configured
+    const port = Number(process.env.PORT || 3000);
+    server.listen(port, () => console.log(`CareBridge running on http://localhost:${port}` + (store ? "" : ` (data: ${cfg.dataDir})`)));
+    // On redeploy the host sends SIGTERM: finish saving, then exit.
+    let stopping = false;
+    const stop = () => {
+      if (stopping) return; stopping = true;
+      server.close();
+      active.close().then(() => process.exit(0), () => process.exit(1));
+      setTimeout(() => process.exit(1), 8000).unref();
+    };
+    process.on("SIGTERM", stop); process.on("SIGINT", stop);
+  })().catch((e) => { console.error("Could not start:", e.message); process.exit(1); });
 }

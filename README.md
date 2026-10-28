@@ -12,221 +12,160 @@
 
 - **Patients** sign in with a code and PIN and answer four daily yes/no questions: medicine taken, swelling, breathlessness, fever. They can add a free-text note and message their nurse.
 - **Nurses** register discharged patients, see a risk-sorted patient list, review and acknowledge alerts, reply to messages, reset PINs and close monitoring.
-- **Owner/admin** can also create nurse (staff) accounts.
+- **Owner/admin** can also create nurse (staff) accounts and **organizations** (hospitals or clinics).
+- **Organizations** sign in with an organization code (for example `ORG-K7M3QX`) and a PIN. They add their own nurses and see an overview of their patients. Nurses an organization adds only see that organization's patients.
 - Warning signs (for example "chest pain" or "faint" in a note) raise an urgent alert. Nurses make every clinical decision; the app only flags and routes.
 
 ## Project structure
 
 ```
 carebridge/
-├── public/
-│   ├── index.html            # Single-file UI (HTML + CSS + JS, no build step)
-│   ├── manifest.webmanifest  # PWA manifest (name, colors, icons, standalone display)
-│   ├── sw.js                 # Service worker (network-first, cache fallback)
-│   ├── icon-192.png          # PWA icon 192x192 (also favicon / apple-touch-icon)
-│   └── icon-512.png          # PWA icon 512x512
-├── server/                   # Backend serving /api/* (not included yet)
+├── public/                    # Front end, served at /
+│   ├── index.html             # Single-file UI (HTML + CSS + JS, no build step)
+│   ├── manifest.webmanifest   # PWA manifest
+│   ├── sw.js                  # Service worker (network-first, cache fallback)
+│   ├── icon-192.png
+│   └── icon-512.png
+├── server/                    # Back end: Node.js (one npm package, pg, only for PostgreSQL)
+│   ├── server.js              # API + static file server
+│   ├── lib/risk.js            # Risk rules and emergency-phrase detection
+│   ├── lib/auth.js            # PIN hashing, sessions, login throttling
+│   ├── lib/store.js           # JSON-file storage and audit log
+│   ├── scripts/backup.js      # npm run backup
+│   └── test/                  # node:test suites
+├── .github/                   # CI workflow, Dependabot, issue and PR templates
+├── .env.example               # Configuration reference
+├── CONTRIBUTING.md  CODE_OF_CONDUCT.md  SECURITY.md  PRIVACY.md  LICENSE
 └── README.md
 ```
 
-## Files explained
+## Quick start
 
-| File | Role |
-|---|---|
-| `index.html` | The whole front end. Talks to the backend through `fetch("/api/...")` with a Bearer token. Stores only the session (`token`, `role`, `user`, `admin`, `pid`) in `localStorage`. Registers the service worker on load. |
-| `manifest.webmanifest` | Makes the app installable. `display: standalone`, portrait, theme `#0E6B68`, background `#EEF3F2`, icons marked `any maskable`. |
-| `sw.js` | Cache name `carebridge-v1`. Precaches `/`, the manifest and `icon-192.png`. For GET requests it tries the network first, updates the cache, and falls back to cache (then `/`) when offline. Requests to `/api/` are never cached. |
-| `icon-512.png` / `icon-192.png` | White cross on teal (`#0E6B68`). Both are referenced by the manifest. |
-
-## API contract used by the front end
-
-All routes are under `/api`, JSON in and out, `Authorization: Bearer <token>`.
-
-| Method | Route | Purpose |
-|---|---|---|
-| POST | `/login` | Body `{role: "staff"\|"patient", id, pin}`; returns `{token, role, user, admin, pid}` |
-| POST | `/logout` | End session |
-| GET | `/patients` | List patients (staff: all, patient: own record) |
-| POST | `/patients` | Register a patient; returns generated `code` and `pin` |
-| POST | `/patients/:id/checkins` | Submit daily check-in `{a, note}` |
-| POST | `/patients/:id/checkins/:i/ack` | Acknowledge an alert |
-| POST | `/patients/:id/log` | Add a message `{text}` |
-| POST | `/patients/:id/status` | Set `monitoring` or `closed` |
-| POST | `/patients/:id/resetpin` | Issue a new PIN |
-| POST | `/staff` | Create a nurse account `{id, name, pin}` (owner only) |
-
-## Run locally
-
-PWAs and service workers need **HTTP(S) from the site root**, not `file://`.
-
-1. Start the backend so it serves `public/` at `/` and handles `/api/*`.
-2. Open `http://localhost:<port>/`.
-3. In Chrome DevTools, use **Application → Manifest** to check installability and **Application → Service Workers** to test offline mode.
-
-To change cached files, bump `C` in `sw.js` (for example `carebridge-v2`) so old caches are removed on activate.
-
-## Dependencies
-
-**Front end (`public/`): none.** There are no npm packages, frameworks, CDN scripts, web fonts or other external requests. Everything is served from your own origin, so there is nothing to patch and patient devices never contact a third party.
-
-**Back end (`server/`):** add your runtime and packages here once the server code is in the repo. Keep the list short and commit the lockfile.
-
-| Item | Version | Purpose |
-|---|---|---|
-| Runtime (Node.js / Python / other) | _fill in_ | Runs the API |
-| Web framework | _fill in_ | Routing for `/api/*` |
-| PIN hashing (bcrypt or Argon2) | _fill in_ | Stores PINs safely |
-| Database driver | _fill in_ | Patient and staff data |
-
-**Install**
+You need **Node.js 20 or newer**. To run with the default file storage there is nothing to install. To use PostgreSQL, run `npm install` once in the `server` folder.
 
 ```bash
 cd server
-npm ci          # Node: installs exactly what package-lock.json lists
-# or: pip install -r requirements.txt
+OWNER_ID=owner OWNER_PIN=choose-a-long-pin npm start
 ```
 
-**Keeping dependencies safe**
+Open http://localhost:3000 and sign in as **Staff** with the owner ID and PIN. The owner account is created on the first run only. Then:
 
-- Commit `package-lock.json` (or a pinned `requirements.txt`) so installs are repeatable.
-- Dependabot is configured in `.github/dependabot.yml` and opens pull requests for security and version updates weekly.
-- Run `npm audit` (or `pip-audit`) before each release and apply security fixes promptly.
-- Do not add a package for something small; every dependency is code you trust with patient data.
+1. Create an organization in the **Orgs** tab (owner only). You get an organization code and a one-time 6-digit PIN to give to the hospital. It signs in under **Organization** and adds its own nurses. (You can also create nurse accounts yourself in the **Staff** tab; those nurses are not tied to an organization.)
+2. Register a discharged patient in **Register**. You get a patient code and a one-time 6-digit PIN to give to the patient.
+3. The patient signs in with that code and PIN and does the daily check-in.
 
-## Deploy checklist
+Run the tests with `npm test`. See `.env.example` for all settings (port, data folder, time zone, proxy, HSTS).
 
-- [ ] Serve over HTTPS
-- [ ] Serve `public/` from `/` (manifest `start_url` and `scope` are `/`)
-- [ ] Confirm `icon-192.png` is deployed (the manifest and service worker reference it)
-- [ ] Send `Cache-Control: no-cache` for `sw.js`
-- [ ] Rate-limit `/api/login` and store PINs hashed
-- [ ] Set up backups for patient data
+## How risk is flagged
+
+| Answer | Points |
+|---|---|
+| Did not take medicine | 1 |
+| New swelling | 2 |
+| Fever or chills | 2 |
+| Short of breath | 3 |
+
+A check-in is **Urgent (red)** if the patient reports shortness of breath, writes an emergency phrase (such as "chest pain" or "kuzimia"), or scores 4 or more. It is **Needs a call (amber)** with any other warning sign, and **On track (green)** with none. These rules only flag; nurses make every clinical decision. The rules live in `server/lib/risk.js` and in `public/index.html`, and a test keeps both identical. Have a clinician review them before real use.
+
+## API
+
+All routes are under `/api`, JSON in and out, with `Authorization: Bearer <token>`. Errors return `{ "error": "message" }`.
+
+| Method | Route | Who | Purpose |
+|---|---|---|---|
+| POST | `/login` | anyone | `{role: "staff"\|"patient"\|"org", id, pin}` returns `{token, role, user, admin, pid}`. For `org`, `id` is the organization code |
+| POST | `/logout` | signed in | End the session |
+| GET | `/patients` | staff: all; patient: own record | List patients |
+| POST | `/patients` | staff | Register a patient; returns `{pin, patient}` (PIN shown once) |
+| POST | `/patients/:id/checkins` | that patient | Daily check-in `{a: {meds, sw, br, fv}, note}` |
+| POST | `/patients/:id/checkins/:i/ack` | staff | Acknowledge an alert |
+| POST | `/patients/:id/log` | staff or that patient | Send a message `{text}` |
+| POST | `/patients/:id/status` | staff | `monitoring` or `closed` |
+| POST | `/patients/:id/resetpin` | staff | New PIN; the old PIN and its sessions stop working |
+| POST | `/staff` | owner or organization | Create a nurse `{id, name, pin}` (PIN 6+ characters). An organization's nurses belong to it |
+| GET | `/staff` | owner or organization | List nurses (an organization sees only its own) |
+| POST | `/orgs` | owner | Create an organization `{name}`; returns `{pin, org: {id, code, name}}` (PIN shown once) |
+| GET | `/orgs` | owner | List organizations with patient and nurse counts |
+| POST | `/orgs/:id/resetpin` | owner | New organization PIN; the old PIN and its sessions stop working |
+
+## SMS and push alerts
+
+Urgent check-ins can alert nurses and organizations by push notification and by SMS, and patients can get a daily SMS reminder. The code is in `server/sms-push/` and everything is off until you add the settings listed in `.env.example`. See `server/sms-push/README.md` for setup.
+
+## Organizations and storage
+
+Organizations are stored in `db.json` (in `DATA_DIR`) next to patients and staff, as `{ id, code, name, pin (hashed), createdAt }`. Organization PINs are hashed with the same scrypt scheme as every other PIN, and the code and PIN of a new organization are shown only once. Staff and patients created under an organization carry its `orgId`. Older `db.json` files are upgraded automatically on start: an empty `orgs` list is added and existing patients and nurses keep working. An organization can see each patient's name, diagnosis and latest risk status, but not their messages or full check-in history. Organization actions are written to `audit.log` (`org_created`, `org_pin_reset`, `login`).
+
+## Dependencies
+
+**One:** `pg`, the standard PostgreSQL driver, used only when `DATABASE_URL` is set. Everything else uses Node.js built-in modules, and the front end has no scripts, fonts or external requests. Keep Node and `pg` up to date; Dependabot and `npm audit` in CI will alert you to problems.
+
+## Deploy on Render
+
+1. Push this project to GitHub with the folders exactly as shown above. `server/package.json` must exist in the repo (check on github.com before deploying).
+2. In Render choose **New → Web Service** and connect the repo.
+3. Use these settings:
+
+| Setting | Value |
+|---|---|
+| Language | **Node** |
+| Branch | `main` |
+| Root Directory | `server` |
+| Build Command | `npm install` |
+| Start Command | `npm start` |
+
+4. Add environment variables: `OWNER_ID`, `OWNER_PIN` (a long, unique PIN), `TZ_NAME` (for example `Africa/Nairobi`), `TRUST_PROXY=1` and `HSTS=1`. Render supplies `PORT` itself.
+5. Click **Create Web Service**. When the build finishes, open the URL Render gives you and sign in as **Staff** with your owner ID and PIN.
+
+**Keep your data:** on Render's free plan the disk is wiped on every restart, spin-down or redeploy, which would delete all patients and check-ins. Use PostgreSQL (below), or a paid plan with a persistent disk mounted at `/var/data` and `DATA_DIR=/var/data`.
+
+## Storage: PostgreSQL (recommended for real use)
+
+Set `DATABASE_URL` and CareBridge stores everything in PostgreSQL instead of `db.json`. Nothing else changes. Tables are created automatically on first start.
+
+- **How it saves:** each patient, nurse, organization and push subscription is one row. Each change is written in one transaction, and the app says "saved" only after the database has committed it. If the database is down, the user sees "Could not save your changes. Please try again." and the app keeps retrying in the background. The audit log goes to the `cb_audit` table.
+- **Run one copy of the server.** Data is also held in memory for speed, so two copies would not see each other's changes.
+- **Moving old data:** `DATABASE_URL=... npm run import:pg -- ./data` copies `db.json` and `audit.log` into an empty database. It refuses to overwrite existing data.
+- **Backups:** `DATABASE_URL=... npm run backup:pg` writes `db.json` and `audit.log` files you can encrypt and keep off-site. You can also use your database provider's own backups.
+- **SSL:** connections to a database on another host are encrypted. `DATABASE_SSL=verify` also checks the server certificate; `DATABASE_SSL=0` turns SSL off.
+- **Free databases expire.** Render's free Postgres is deleted 30 days after creation and has no backups. Use a paid database for real patients.
+
+**Common build errors**
+
+| Error | Cause and fix |
+|---|---|
+| `Root directory "server" does not exist` | The `server/` folder is not on GitHub. Upload it, then redeploy. |
+| `Could not read package.json` at `/src/package.json` | Root Directory is empty or wrong. Set it to `server`. |
+| `go build` or `Using Go version` in the log | The service was created with the wrong Language. Create a new service with **Node**. |
+
+## Run in production
+
+- [ ] Run behind HTTPS (for example Caddy or Nginx) and set `HSTS=1` and, if behind a proxy, `TRUST_PROXY=1`
+- [ ] Use PostgreSQL (`DATABASE_URL`) on a paid plan with backups on, or set `DATA_DIR` to an encrypted disk outside the repo. Schedule `npm run backup` (or `npm run backup:pg`) with encrypted off-site copies
+- [ ] Use a long, unique `OWNER_PIN`, then remove it from the environment after the first run
+- [ ] Keep Node.js updated; run the server as a non-root user
+- [ ] Review `audit.log` regularly
+- [ ] Read [SECURITY.md](SECURITY.md) and [PRIVACY.md](PRIVACY.md) and complete their checklists
+
+The JSON-file storage suits a pilot or a single clinic. Move to a proper database before wider use.
 
 ## Safety and privacy
 
 CareBridge supports clinicians and does not replace them. Patient health data is sensitive: use HTTPS, hashed PINs, access logging, and follow your hospital's and your country's data-protection rules (for example Kenya's Data Protection Act, 2019).
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
 ## Roadmap
 
-- SMS and voice check-ins (including Swahili)
+- Swahili in the main app (the demo already has it)
+- SMS and voice check-ins for patients without smartphones
 - Hospital-specific care plans
 - Push notifications for urgent alerts
-const express = require("express");
-const Organization = require("../models/Organization");
-const User = require("../models/User");
-const auth = require("../middleware/auth"); // your existing auth middleware
-const orgAdmin = require("../middleware/orgAdmin");
+- Patient data export and automatic deletion after the retention period
+- A real database for larger deployments
 
-const router = express.Router();
-router.use(auth);
+## License
 
-// Create an organization. The creator becomes its first admin.
-router.post("/", async (req, res, next) => {
-  try {
-    const { name, type, email, phone, address } = req.body;
-    if (!name || !name.trim()) {
-      return res.status(400).json({ message: "Organization name is required." });
-    }
-
-    const org = await Organization.create({
-      name, type, email, phone, address,
-      createdBy: req.user.id,
-      members: [{ user: req.user.id, role: "admin" }],
-    });
-
-    await User.findByIdAndUpdate(req.user.id, { $addToSet: { organizations: org._id } });
-    res.status(201).json(org);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// List organizations the signed-in user belongs to.
-router.get("/mine", async (req, res, next) => {
-  try {
-    const orgs = await Organization.find({ "members.user": req.user.id }).sort({ name: 1 });
-    res.json(orgs);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// Join an organization with its invite code.
-router.post("/join", async (req, res, next) => {
-  try {
-    const code = (req.body.inviteCode || "").trim().toUpperCase();
-    const org = await Organization.findOne({ inviteCode: code });
-    if (!org) return res.status(404).json({ message: "That invite code isn't valid." });
-
-    if (org.members.some((m) => m.user.toString() === req.user.id)) {
-      return res.status(409).json({ message: "You're already a member of this organization." });
-    }
-
-    org.members.push({ user: req.user.id, role: "member" });
-    await org.save();
-    await User.findByIdAndUpdate(req.user.id, { $addToSet: { organizations: org._id } });
-    res.json(org);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// Admin: add an existing user by email.
-router.post("/:id/members", orgAdmin, async (req, res, next) => {
-  try {
-    const user = await User.findOne({ email: (req.body.email || "").toLowerCase() });
-    if (!user) return res.status(404).json({ message: "No user found with that email." });
-
-    if (req.org.members.some((m) => m.user.equals(user._id))) {
-      return res.status(409).json({ message: "That person is already a member." });
-    }
-
-    req.org.members.push({ user: user._id, role: req.body.role === "admin" ? "admin" : "member" });
-    await req.org.save();
-    await User.findByIdAndUpdate(user._id, { $addToSet: { organizations: req.org._id } });
-    res.status(201).json(req.org);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// Admin: change a member's role.
-router.patch("/:id/members/:userId", orgAdmin, async (req, res, next) => {
-  try {
-    const member = req.org.members.find((m) => m.user.toString() === req.params.userId);
-    if (!member) return res.status(404).json({ message: "Member not found." });
-
-    const admins = req.org.members.filter((m) => m.role === "admin");
-    if (member.role === "admin" && req.body.role === "member" && admins.length === 1) {
-      return res.status(400).json({ message: "An organization needs at least one admin." });
-    }
-
-    member.role = req.body.role === "admin" ? "admin" : "member";
-    await req.org.save();
-    res.json(req.org);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// Admin: remove a member.
-router.delete("/:id/members/:userId", orgAdmin, async (req, res, next) => {
-  try {
-    const target = req.org.members.find((m) => m.user.toString() === req.params.userId);
-    if (!target) return res.status(404).json({ message: "Member not found." });
-
-    const admins = req.org.members.filter((m) => m.role === "admin");
-    if (target.role === "admin" && admins.length === 1) {
-      return res.status(400).json({ message: "You can't remove the only admin." });
-    }
-
-    req.org.members = req.org.members.filter((m) => m.user.toString() !== req.params.userId);
-    await req.org.save();
-    await User.findByIdAndUpdate(req.params.userId, { $pull: { organizations: req.org._id } });
-    res.json(req.org);
-  } catch (err) {
-    next(err);
-  }
-});
-
-module.exports = router;
+[MIT](LICENSE)
